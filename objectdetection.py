@@ -12,6 +12,7 @@ from azure.storage.blob import ContentSettings
 # this script is based on the
 
 #   find the sun script   
+block_blob_service = BlockBlobService(account_name='myaccount', account_key='mykey')
 
 class TheOutliner(object):
     ''' takes a dict of xy points and
@@ -24,8 +25,6 @@ class TheOutliner(object):
         self.minY = 0
         self.maxX = 0
         self.maxY = 0
-        # Enter your storage info here
-        self.block_blob_service = BlockBlobService(account_name='myaccount', account_key='mykey')
     def doEverything(self, imgPath, dictPoints, theoutfile):
         self.loadImage(imgPath)
         self.loadBrightPoints(dictPoints)
@@ -55,10 +54,11 @@ class TheOutliner(object):
             elif point[0] > self.maxX:
                 self.maxX = point[0]
 
-            if point[1]< self.minY:
+            if point[1] < self.minY:
                 self.minY = point[1]
             elif point[1] > self.maxY:
                 self.maxY = point[1]
+            
     def drawBox(self):
         # drop box around bright points
 
@@ -73,9 +73,9 @@ class TheOutliner(object):
             # right bar
             self.picn[self.maxX, y] = self.outlineColor
     def crop(self, i, filename):
-        #print self.minX, self.minY, self.maxX, self.maxY
+        #print(self.minX, self.minY, self.maxX, self.maxY
         self.pic.copy().crop((self.minX, self.minY, self.maxX, self.maxY)).save(filename)
-        
+
         # Save these coordinates to table
         #Top bar
         # self.minX, self.minY
@@ -94,10 +94,10 @@ class TheOutliner(object):
         # self.maxX, self.maxY
     def saveImg(self, outFile, path):
         #self.pic.save(theoutfile, "JPEG")
-        self.block_blob_service.create_blob_from_path(
+        block_blob_service.create_blob_from_path(
             'image-objects/' + path,
             outFile,
-            outFile,
+            path + "/" + outFile,
             content_settings=ContentSettings(content_type='image/jpg')
                     )
 
@@ -150,28 +150,39 @@ class ObjectDetector(object):
         #   the self.detail is the faster the analyzation will be
         self.detail += 1
         self.size += 1
-        
+
+    def checkAlpha(self):
+        if self.pic.mode in ('RGBA', 'LA') or (self.pic.mode == 'P' and 'transparency' in self.pic.info):
+            print("     has alpha channel")
+            self.alpha = True
+        else:
+            print("     no alpha channel")
+            self.alpha = False
+
     def getSurroundingPoints(self, xy):
         ''' returns list of adjoining point '''
         x = xy[0]
         y = xy[1]
         plist = (
             (x-self.detail, y-self.detail), (x, y-self.detail), (x+self.detail, y-self.detail),
-            (x-self.detail, y),(x+self.detail, y),
-            (x-self.detail, y+self.detail),(x, y+self.detail),(x+self.detail,y+self.detail)
+            (x-self.detail, y), (x+self.detail, y),
+            (x-self.detail, y+self.detail), (x, y+self.detail), (x+self.detail, y+self.detail)
             )
-        return (plist)
+        return plist
 
     def getRGBFor(self, x, y):
         try:
-            return self.picn[x,y]
+            return self.picn[x, y]
         except IndexError as e:
-            return 255,255,255
+            return 255, 255, 255
 
     def readyToBeEvaluated(self, xy):
         try:
-            r,g,b = self.picn[xy[0],xy[1]]
-            if r==255 and g==255 and b==255:
+            if self.alpha:
+                r, g, b, _ = self.picn[xy[0], xy[1]]
+            else:
+                r, g, b = self.picn[xy[0], xy[1]]
+            if r == 255 and g == 255 and b == 255:
                 return False
         except:
             return False
@@ -179,7 +190,7 @@ class ObjectDetector(object):
 
     def markEvaluated(self, xy):
         try:
-            self.picn[xy[0],xy[1]] = self.no, self.no, self.no
+            self.picn[xy[0], xy[1]] = self.no, self.no, self.no
         except:
             pass
 
@@ -188,7 +199,10 @@ class ObjectDetector(object):
             if x % self.detail == 0:
                 for y in xrange(self.pic.size[1]):
                     if y % self.detail == 0:
-                        r,g,b = self.picn[x,y]
+                        if self.alpha:
+                            r, g, b, _ = self.picn[x, y]
+                        else:
+                            r, g, b = self.picn[x, y]
                         if r == self.no and \
                             g == self.no and \
                             b == self.no:
@@ -197,28 +211,31 @@ class ObjectDetector(object):
                             pass
                         else:
                             ol = {}
-                            ol[x,y] = "go"
+                            ol[x, y] = "go"
                             pp = []
-                            pp.append((x,y))
+                            pp.append((x, y))
                             stillLooking = True
                             while stillLooking:
                                 if len(pp) > 0:
                                     xe, ye = pp.pop()
                                     # look for adjoining points
 
-                                    for p in self.getSurroundingPoints((xe,ye)):
+                                    for p in self.getSurroundingPoints((xe, ye)):
                                         if self.readyToBeEvaluated((p[0], p[1])):
-                                            r2,g2,b2 = self.getRGBFor(p[0], p[1])
+                                            if self.alpha:
+                                                r2, g2, b2, _ = self.getRGBFor(p[0], p[1])
+                                            else:
+                                                r2, g2, b2 = self.getRGBFor(p[0], p[1])
                                             if abs(r-r2) < self.close and \
                                                 abs(g-g2) < self.close and \
                                                 abs(b-b2) < self.close:
                                                 # then its close enough
 
-                                                ol[p[0],p[1]] = "go"
-                                                pp.append((p[0],p[1]))
+                                                ol[p[0], p[1]] = "go"
+                                                pp.append((p[0], p[1]))
 
-                                            self.markEvaluated((p[0],p[1]))
-                                        self.markEvaluated((xe,ye))
+                                            self.markEvaluated((p[0], p[1]))
+                                        self.markEvaluated((xe, ye))
                                 else:
                                     # done expanding that point
                                     stillLooking = False
@@ -227,10 +244,10 @@ class ObjectDetector(object):
 
 
 if __name__ == "__main__":
-    print "Start Process"
+    print("Start Process")
 
     # assumes that the .jpg files are in
-    #   working directory 
+    # working directory 
     theFile = "3.jpg"
 
     theOutFile = "3.output.jpg"
@@ -240,32 +257,38 @@ if __name__ == "__main__":
     for f in os.listdir('.'):
         if f.find(".jpg") > 0:
             theFile = f
-            print "working on " + theFile + "..."
+            print("working on " + theFile + "...")
 
             theOutFile = theFile + ".out.jpg"
             bbb = ObjectDetector()
             bbb.loadImage(theFile)
-            print "     analyzing.."
-            print "     file dimensions: " + str(bbb.picSize)
-            print "        this files object weight: " + str(bbb.size)
-            print "        this files analyzation detail: " + str(bbb.detail)
+            print("     analyzing..")
+            print("     file dimensions: " + str(bbb.picSize))
+            print("        this files object weight: " + str(bbb.size))
+            print("        this files analyzation detail: " + str(bbb.detail))
+            bbb.checkAlpha()
             bbb.collectAllObjectPoints()
-            print "     objects detected: " +str(len(bbb.objects))
+            print("     objects detected: " +str(len(bbb.objects)))
             drawer = TheOutliner()
-            print "     loading and drawing rectangles.."
+            print("     loading and drawing rectangles..")
+
+            newDir = os.path.splitext(theFile)[0]
+            if not os.path.exists(newDir):
+                os.makedirs(newDir)
 
             drawer.loadImage(theFile)
-            for idx,o in enumerate(bbb.objects):
-                outFile = os.path.splitext(theFile)[0] + "-" + `idx` + ".jpg"
+            for idx, o in enumerate(bbb.objects):
+                outFile = newDir + "-" + `idx` + ".jpg"
                 drawer.loadBrightPoints(o)
-                drawer.crop(idx, outFile)
+                drawer.crop(idx, newDir + '/' + outFile)
                 #drawer.drawBox()
-                drawer.saveImg(outFile, os.path.splitext(theFile)[0])
 
-            #print "saving image..."
+                drawer.saveImg(outFile, newDir)
+
+            #print("saving image..."
             #drawer.saveImg(theOutFile)
 
-            print "Process complete"
+            print("Process complete")
 
 #output
 #Start Process

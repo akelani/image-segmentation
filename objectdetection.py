@@ -12,7 +12,7 @@ from azure.storage.blob import ContentSettings
 # this script is based on the
 
 #   find the sun script   
-block_blob_service = BlockBlobService(account_name='myaccount', account_key='mykey')
+block_blob_service = BlockBlobService(account_name='<account_name>', account_key='<account_key>')
 
 class TheOutliner(object):
     ''' takes a dict of xy points and
@@ -29,8 +29,6 @@ class TheOutliner(object):
         self.loadImage(imgPath)
         self.loadBrightPoints(dictPoints)
         self.drawBox()
-        self.crop()
-        self.saveImg(theoutfile)
     def loadImage(self, imgPath):
         self.pic = Image.open(imgPath)
         self.picn = self.pic.load()
@@ -98,9 +96,8 @@ class TheOutliner(object):
             'image-objects/' + path,
             outFile,
             path + "/" + outFile,
-            content_settings=ContentSettings(content_type='image/jpg')
-                    )
-
+            content_settings=ContentSettings(content_type='image/jpg'),
+            timeout=5)
 
 
 #class CollectBrightPoints(object):
@@ -255,11 +252,11 @@ if __name__ == "__main__":
     import os
     os.listdir('.')
     for f in os.listdir('.'):
-        if f.find(".jpg") > 0:
+        if f.find(".jpg") > 0 or f.find(".png") > 0:
             theFile = f
             print("working on " + theFile + "...")
 
-            theOutFile = theFile + ".out.jpg"
+            # theOutFile = theFile + ".out.jpg"
             bbb = ObjectDetector()
             bbb.loadImage(theFile)
             print("     analyzing..")
@@ -273,12 +270,14 @@ if __name__ == "__main__":
             print("     loading and drawing rectangles..")
 
             newDir = os.path.splitext(theFile)[0]
+            extension = os.path.splitext(theFile)[1]
+
             if not os.path.exists(newDir):
                 os.makedirs(newDir)
 
             drawer.loadImage(theFile)
             for idx, o in enumerate(bbb.objects):
-                outFile = newDir + "-" + `idx` + ".jpg"
+                outFile = "{}-{}{}".format(newDir, idx, extension)
                 drawer.loadBrightPoints(o)
                 drawer.crop(idx, newDir + '/' + outFile)
                 #drawer.drawBox()
